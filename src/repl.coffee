@@ -11,6 +11,7 @@ stdout = process.stdout
 # Require the **coffee-script** module to get access to the compiler.
 CoffeeScript = require './coffee-script'
 readline     = require 'readline'
+proc         = require 'child_process'
 {inspect}    = require 'util'
 {Script}     = require 'vm'
 Module       = require 'module'
@@ -100,8 +101,13 @@ run = (buffer) ->
     repl.setPrompt REPL_PROMPT_CONTINUATION
     repl.prompt()
     return
+
   repl.setPrompt REPL_PROMPT
   backlog = ''
+  # Handle magic commands.
+  if code[0] is '%'
+    return magic code
+
   try
     _ = global._
     returnValue = CoffeeScript.eval "_=(#{code}\n)", {
@@ -114,6 +120,31 @@ run = (buffer) ->
   catch err
     error err
   repl.prompt()
+
+shell = (cmd, cb) ->
+  proc.exec cmd, (err, stdout, stderr) ->
+    error err if err
+    error stderr if stderr
+    cb null, stdout.toString().trim()
+  
+MAGICS =
+  pwd: (done) -> shell 'pwd', done
+  ls:  (done) -> shell 'ls', done
+  #cd:  (path, done) ->
+
+magic = (code) ->
+
+  try
+    cmd = code[1..].split(/\W/)[0]
+
+    done = (err, result) ->
+      repl.output.write "#{result.toString()}\n"
+      repl.prompt()
+
+    MAGICS[cmd](done)
+  catch err
+    error err
+  return
 
 if stdin.readable and stdin.isRaw
   # handle piped input
@@ -170,6 +201,10 @@ repl.input.on 'keypress', (char, key) ->
   return unless key and key.ctrl and not key.meta and not key.shift and key.name is 'd'
   multilineMode = off
   repl._line()
+
+# Ctrl-c shows new prompt.
+repl.on 'SIGINT', ->
+  repl.emit 'attemptClose'
 
 repl.on 'attemptClose', ->
   if multilineMode
